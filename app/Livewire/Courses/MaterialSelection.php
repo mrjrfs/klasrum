@@ -23,6 +23,11 @@ class MaterialSelection extends Component
         $this->loadData();
     }
 
+    protected $listeners = [
+        'refreshLessonList' => '$refresh',
+        'materialStatusUpdated' => '$refresh',
+    ];
+
     private function loadData()
     {
         $this->data = Chapter::where('course_id', $this->courseID)

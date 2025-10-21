@@ -3,17 +3,17 @@
 namespace App\Livewire\Courses;
 
 use App\Models\Assignment;
-use App\Models\Chapter; // Tidak langsung digunakan di sini, tapi mungkin untuk relasi
+use App\Models\Chapter;
 use App\Models\Material;
 use App\Models\Quiz;
 use App\Models\QuizAttempt;
 use App\Models\UserMaterialStatus;
+use Carbon\Carbon;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
-use Livewire\Attributes\Layout; // Ini tidak relevan untuk komponen yang di-embed
 use Livewire\Attributes\On;
 use Livewire\Component;
-use Carbon\Carbon; // Tambahkan ini untuk bekerja dengan tanggal
 
 class MaterialInfo extends Component
 {
@@ -27,17 +27,14 @@ class MaterialInfo extends Component
     public $quizAttempts;
     public $assignmentId;
     public $assignment;
-
-    // Properti untuk Quiz
     public $maxLivesPerDay = 3;
     public $dailyAttempts;
     public $todayLivesRemaining;
     public $canAttemptToday;
-    public $hasPerfectScore; // Sudah ada, bagus
-
-    public $timerDuration; // Properti baru untuk durasi timer
-    public $isMaterialCompleted = false; // Properti baru untuk status penyelesaian materi
-    public $showNextButton = false; // Properti baru untuk menampilkan tombol Next
+    public $hasPerfectScore;
+    public $timerDuration;
+    public $isMaterialCompleted = false;
+    public $showNextButton = false;
     private $currentlyLoadedMaterialId = null;
 
     protected $languages = [
@@ -51,6 +48,13 @@ class MaterialInfo extends Component
         'SQL' => 'https://www.programiz.com/sql/online-compiler/',
     ];
 
+    // Listener untuk memilih konten dari sidebar
+    protected $listeners = [
+        'materialSelected' => 'loadContent',
+        'quizSelected' => 'loadContent',
+        'assignmentSelected' => 'loadContent',
+    ];
+
     public function mount()
     {
         $this->selectedLanguage = array_key_first($this->languages);
@@ -62,62 +66,39 @@ class MaterialInfo extends Component
         $this->iframeSrc = $this->languages[$this->selectedLanguage];
     }
 
-    
+    // Listener untuk event pemilihan konten
+    #[On('materialSelected')]
     #[On('quizSelected')]
     #[On('assignmentSelected')]
-    #[On('materialSelected')]
-   // Tambahkan listener ini untuk retake quiz
-    public function loadContent($materialId = null, $quizId = null, $assignmentId = null, $isPassed = null)
+    public function loadContent($materialId = null, $quizId = null, $assignmentId = null)
     {
-        // Prevent re-loading the same material if it's already loaded and not yet completed
-        if ($materialId && $this->currentlyLoadedMaterialId === $materialId && !$this->isMaterialCompleted) {
-            Log::debug('MaterialInfo: Attempted to load same material (' . $materialId . ') that is not yet completed. Aborting.');
-            return;
-        }
+        // Reset properti konten
+        $this->material = null; $this->quiz = null; $this->assignment = null; $this->message = null;
+        $this->materialId = null; $this->quizId = null; $this->assignmentId = null;
+        $this->currentlyLoadedMaterialId = null;
+        $this->isMaterialCompleted = false; $this->showNextButton = false; $this->timerDuration = null;
 
-        // --- PENTING: RESET SEMUA PROPERTI TERKAIT KONTEN DI AWAL ---
-        $this->material = null;
-        $this->currentlyLoadedMaterialId = null; // Reset this as well
-        // JANGAN reset $this->quiz atau $this->quizId di sini jika ingin tetap merender kotak quiz
-        // $this->quiz = null;
-        // $this->quizId = null;    // Reset juga ID quiz
-        $this->assignment = null;
-        $this->materialId = null; // Reset juga ID material
-        $this->assignmentId = null; // <-- BARIS INI PENTING: Reset ID assignment
-        $this->message = null;
-
-        // Reset properti quiz-specific juga
-        $this->quizAttempts = collect();
-        $this->hasPerfectScore = false;
-        $this->dailyAttempts = 0;
-        $this->todayLivesRemaining = $this->maxLivesPerDay;
-        $this->canAttemptToday = false;
-        $this->timerDuration = null; // Reset timer duration
-        $this->isMaterialCompleted = false; // Reset status penyelesaian materi
-        $this->showNextButton = false; // Reset status tombol Next
-        // --- AKHIR RESET ---
+        // Reset properti quiz
+        $this->quizAttempts = collect(); $this->hasPerfectScore = false; $this->dailyAttempts = 0;
+        $this->todayLivesRemaining = $this->maxLivesPerDay; $this->canAttemptToday = false;
 
         try {
             if ($quizId) {
                 $this->quizId = $quizId;
                 $this->quiz = Quiz::findOrFail($quizId);
 
-                // Pengecekan skor kuis sebelumnya (Kode Anda sudah benar)
                 if (!$this->checkPreviousQuizScore($this->quiz->chapter_id)) {
                     $this->message = 'Anda harus mendapatkan skor 100 pada kuis bab sebelumnya untuk dapat mengakses kuis ini.';
                     $this->quiz = null;
                     return;
                 }
 
-                // Lanjutkan memuat data attempt jika lolos pengecekan (Kode Anda sudah benar)
                 $currentUserId = auth()->id();
                 $this->quizAttempts = QuizAttempt::where('quiz_id', $quizId)
                     ->where('user_id', $currentUserId)
                     ->orderBy('created_at', 'desc')
                     ->get();
                 $this->hasPerfectScore = $this->quizAttempts->contains('score', 100);
-
-                 // Kalkulasi nyawa yang sederhana dan selalu benar
                 $this->dailyAttempts = $this->quizAttempts->filter(fn ($attempt) => $attempt->created_at->isToday())->count();
                 $this->todayLivesRemaining = $this->maxLivesPerDay - $this->dailyAttempts;
                 $this->canAttemptToday = !$this->hasPerfectScore && $this->todayLivesRemaining > 0;
@@ -127,18 +108,17 @@ class MaterialInfo extends Component
                 $this->material = Material::findOrFail($materialId);
                 $this->currentlyLoadedMaterialId = $materialId;
 
-                // Pengecekan skor kuis sebelumnya (Kode Anda sudah benar)
                 if (!$this->checkPreviousQuizScore($this->material->chapter_id)) {
                     $this->message = 'Anda harus mendapatkan skor 100 pada kuis bab sebelumnya untuk dapat melihat materi ini.';
                     $this->material = null;
                     return;
                 }
 
-                // Lanjutkan memuat status materi dan timer (Kode Anda sudah benar)
                 $userId = Auth::id();
                 $userMaterialStatus = UserMaterialStatus::where('user_id', $userId)
                     ->where('material_id', $this->material->id)
                     ->first();
+
                  $materialDurationMinutes = $this->material->duration_in_minutes ?? 0;
                  $materialDurationSeconds = $materialDurationMinutes * 60;
 
@@ -161,7 +141,12 @@ class MaterialInfo extends Component
                         }
                     }
                 } else {
-                     UserMaterialStatus::create([ 'user_id' => $userId, 'material_id' => $this->material->id, 'is_completed' => 0, 'completed_at' => now()->addSeconds($materialDurationSeconds) ]);
+                     UserMaterialStatus::create([
+                        'user_id' => $userId,
+                        'material_id' => $this->material->id,
+                        'is_completed' => 0,
+                        'completed_at' => now()->addSeconds($materialDurationSeconds),
+                     ]);
                      $this->isMaterialCompleted = false;
                      $this->timerDuration = $materialDurationMinutes;
                      $this->dispatch('startTimer', $this->timerDuration);
@@ -171,7 +156,10 @@ class MaterialInfo extends Component
             } elseif ($assignmentId) {
                  $this->assignmentId = $assignmentId;
                  $this->assignment = Assignment::findOrFail($assignmentId);
-                 if (!$this->assignment) { /* handle not found */ }
+                 if (!$this->assignment) {
+                     $this->message = 'Assignment not found.';
+                     return;
+                 }
                  // Tambahkan pengecekan skor kuis sebelumnya jika diperlukan
                  // if (!$this->checkPreviousQuizScore($this->assignment->chapter_id)) { ... }
 
@@ -185,30 +173,13 @@ class MaterialInfo extends Component
         }
     }
 
-    private function getPreviousOrderNumber($currentOrderNumber, $chapterId)
-    {
-        return Material::where('chapter_id', $chapterId)
-            ->where('order_number', '<', $currentOrderNumber)
-            ->max('order_number');
-    }
-
-    private function getNextOrderNumber($currentOrderNumber, $chapterId)
-    {
-        return Material::where('chapter_id', $chapterId)
-            ->where('order_number', '>', $currentOrderNumber)
-            ->min('order_number');
-    }
-
     private function checkPreviousQuizScore($chapterId)
     {
+        if (!$chapterId) { return false; }
         $userId = Auth::id();
         $currentChapter = Chapter::find($chapterId);
+        if (!$currentChapter || $currentChapter->chapter_number <= 1) { return true; }
 
-        if (!$currentChapter || $currentChapter->chapter_number <= 1) {
-            return true;
-        }
-
-        // Cari chapter sebelumnya DI DALAM COURSE YANG SAMA berdasarkan nomor chapter.
         $previousChapter = Chapter::where('course_id', $currentChapter->course_id)
             ->where('chapter_number', '<', $currentChapter->chapter_number)
             ->orderBy('chapter_number', 'desc')
@@ -224,7 +195,31 @@ class MaterialInfo extends Component
             ->exists();
     }
 
-    
+    #[On('quizAttemptUpdated')]
+    public function handleQuizUpdate($quizId)
+    {
+        $this->loadContent(quizId: $quizId);
+        $this->dispatch('refreshLessonList');
+    }
+
+    #[On('timerFinished')]
+    public function markMaterialAsCompleted()
+    {
+        $userId = Auth::id();
+        if ($this->materialId && $userId) {
+            $userMaterialStatus = UserMaterialStatus::where('user_id', $userId)
+                ->where('material_id', $this->materialId)
+                ->first();
+            if ($userMaterialStatus && !$userMaterialStatus->is_completed) {
+                $userMaterialStatus->update(['is_completed' => 1, 'completed_at' => now()]);
+                // Muat ulang konten SETELAH update
+                $this->loadContent(materialId: $this->materialId);
+                // Beri tahu sidebar SETELAH konten dimuat ulang
+                $this->dispatch('materialStatusUpdated'); // Ganti nama event agar lebih spesifik
+            }
+        }
+    }
+
     public function nextMaterial()
     {
         if (!$this->material) {
@@ -298,46 +293,23 @@ class MaterialInfo extends Component
         }
     }
 
+
     public function render()
     {
         return view('livewire.courses.material-info', [
             'material' => $this->material,
             'quiz' => $this->quiz,
-            'languages' => $this->languages,
             'quizAttempts' => $this->quizAttempts,
-            'assignmentID' => $this->assignmentId, // Sekarang ini akan memiliki nilai yang benar
             'assignment' => $this->assignment,
             'hasPerfectScore' => $this->hasPerfectScore,
             'canAttemptToday' => $this->canAttemptToday,
             'todayLivesRemaining' => $this->todayLivesRemaining,
             'message' => $this->message,
+            'isMaterialCompleted' => $this->isMaterialCompleted,
+            'showNextButton' => $this->showNextButton,
+            'timerDuration' => $this->timerDuration,
+            'languages' => $this->languages,
+            'iframeSrc' => $this->iframeSrc,
         ]);
-    }
-    #[On('quizAttemptUpdated')] // Nama event sesuai dengan TakeQuiz
-    public function handleQuizUpdate($quizId)
-    {
-        $this->loadContent(quizId: $quizId);
-        $this->dispatch('refreshLessonList');
-    }
-
-    #[On('timerFinished')]
-    public function markMaterialAsCompleted()
-    {
-        $userId = Auth::id();
-        if ($this->materialId && $userId) {
-            $userMaterialStatus = UserMaterialStatus::where('user_id', $userId)
-                                                    ->where('material_id', $this->materialId)
-                                                    ->first();
-            if ($userMaterialStatus) {
-                $userMaterialStatus->is_completed = 1;
-                $userMaterialStatus->completed_at = now();
-                $userMaterialStatus->save();
-
-                // Reload content to update timer display to 00:00
-                $this->loadContent($this->materialId);
-                $this->showNextButton = true;
-                $this->dispatch('materialStatusUpdated');
-            }
-        }
     }
 }

@@ -2,6 +2,10 @@
 /node_modules
 /vendor
 
+# Build Assets (Tambahkan bagian ini)
+/public/build
+/public/hot
+
 # Log files
 *.log
 npm-debug.log*
