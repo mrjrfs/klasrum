@@ -1,11 +1,11 @@
 {
   "resources/css/app.css": {
-    "file": "assets/app-CCYsUiLz.css",
+    "file": "assets/app-C9D_d-mv.css",
     "src": "resources/css/app.css",
     "isEntry": true
   },
   "resources/css/filament/student/theme.css": {
-    "file": "assets/theme-kwAC6slu.css",
+    "file": "assets/theme-DUZEC4JG.css",
     "src": "resources/css/filament/student/theme.css",
     "isEntry": true
   },
@@ -13,6 +13,12 @@
     "file": "assets/app-CqflisoM.js",
     "name": "app",
     "src": "resources/js/app.js",
+    "isEntry": true
+  },
+  "resources/js/countdown-timer.js": {
+    "file": "assets/countdown-timer-D9mHefw2.js",
+    "name": "countdown-timer",
+    "src": "resources/js/countdown-timer.js",
     "isEntry": true
   }
 }

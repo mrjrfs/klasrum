@@ -15,6 +15,8 @@ use Illuminate\Support\Str;
 use Illuminate\Testing\PendingCommand;
 use InvalidArgumentException;
 use Orchestra\Sidekick;
+use PHPUnit\Framework\TestCase as PHPUnitTestCase;
+use PHPUnit\Runner\ShutdownHandler;
 
 /**
  * Create Laravel application instance.
@@ -62,6 +64,34 @@ function artisan(Contracts\TestCase|ApplicationContract $context, string $comman
 }
 
 /**
+ * Emit an exit event within a test.
+ *
+ * @param  \PHPUnit\Framework\TestCase|object|null  $testCase
+ * @param  string|int  $status
+ * @return never
+ */
+function bail(?object $testCase, string|int $status = 0): never
+{
+    if ($testCase instanceof PHPUnitTestCase && Sidekick\phpunit_version_compare('12.3.5', '>=')) {
+        ShutdownHandler::resetMessage();
+    }
+
+    exit($status);
+}
+
+/**
+ * Emit an exit event within a test.
+ *
+ * @param  \PHPUnit\Framework\TestCase|object|null  $testCase
+ * @param  string|int  $status
+ * @return never
+ */
+function terminate(?object $testCase, string|int $status = 0): never
+{
+    bail($testCase, $status);
+}
+
+/**
  * Run remote action using Testbench CLI.
  *
  * @api
@@ -77,7 +107,7 @@ function remote(Closure|array|string $command, array|string $env = [], ?bool $tt
         package_path(), $env, $tty
     );
 
-    $binary = \defined('TESTBENCH_DUSK') ? 'testbench-dusk' : 'testbench';
+    $binary = Sidekick\is_testbench_cli(dusk: true) ? 'testbench-dusk' : 'testbench';
 
     $commander = is_file($vendorBinary = package_path('vendor', 'bin', $binary))
         ? $vendorBinary
@@ -109,9 +139,11 @@ function once($callback): Closure
  *
  * @api
  *
- * @param  \Illuminate\Contracts\Foundation\Application  $app
- * @param  string  $name
- * @param  (\Closure(object, \Illuminate\Contracts\Foundation\Application):(mixed))|null  $callback
+ * @template TLaravel of \Illuminate\Contracts\Foundation\Application
+ *
+ * @param  TLaravel  $app
+ * @param  class-string|string  $name
+ * @param  (\Closure(object, TLaravel):(mixed))|null  $callback
  * @return void
  */
 function after_resolving(ApplicationContract $app, string $name, ?Closure $callback = null): void
@@ -151,7 +183,7 @@ function load_migration_paths(ApplicationContract $app, array|string $paths): vo
  */
 function defined_environment_variables(): array
 {
-    return Collection::make(array_merge($_SERVER, $_ENV))
+    return (new Collection(array_merge($_SERVER, $_ENV)))
         ->keys()
         ->mapWithKeys(static fn (string $key) => [$key => Sidekick\Env::forward($key)])
         ->unless(
@@ -169,7 +201,7 @@ function defined_environment_variables(): array
  */
 function parse_environment_variables($variables): array
 {
-    return Collection::make($variables)
+    return (new Collection($variables))
         ->transform(static function ($value, $key) {
             if (\is_bool($value) || \in_array($value, ['true', 'false'])) {
                 $value = \in_array($value, [true, 'true']) ? '(true)' : '(false)';
@@ -253,13 +285,26 @@ function transform_relative_path(string $path, string $workingPath): string
  * @no-named-arguments
  *
  * @param  array<int, string|null>|string  ...$path
- * @return string
+ * @return ($path is '' ? string : string|false)
  */
-function default_skeleton_path(array|string $path = ''): string
+function default_skeleton_path(array|string $path = ''): string|false
 {
-    return (string) realpath(
+    return realpath(
         Sidekick\join_paths(__DIR__, '..', 'laravel', ...Arr::wrap(\func_num_args() > 1 ? \func_get_args() : $path))
     );
+}
+
+/**
+ * Determine if application is bootstrapped using Testbench's default skeleton.
+ *
+ * @param  string|null  $basePath
+ * @return bool
+ */
+function uses_default_skeleton(?string $basePath = null): bool
+{
+    $basePath ??= base_path();
+
+    return realpath(Sidekick\join_paths($basePath, 'bootstrap', '.testbench-default-skeleton')) !== false;
 }
 
 /**
@@ -395,9 +440,10 @@ function laravel_vendor_exists(ApplicationContract $app, ?string $workingPath = 
  *
  * @param  string  $version
  * @param  string|null  $operator
- * @return int|bool
  *
  * @phpstan-param  TOperator  $operator
+ *
+ * @return int|bool
  *
  * @phpstan-return (TOperator is null ? int : bool)
  */
@@ -415,13 +461,14 @@ function laravel_version_compare(string $version, ?string $operator = null): int
  *
  * @param  string  $version
  * @param  string|null  $operator
- * @return int|bool
- *
- * @throws \RuntimeException
  *
  * @phpstan-param  TOperator  $operator
  *
+ * @return int|bool
+ *
  * @phpstan-return (TOperator is null ? int : bool)
+ *
+ * @throws \RuntimeException
  */
 function phpunit_version_compare(string $version, ?string $operator = null): int|bool
 {
